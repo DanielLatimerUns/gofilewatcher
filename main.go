@@ -1,14 +1,15 @@
 package main
 
 import (
-	"github.com/fsnotify/fsnotify"
 	"log"
 	"os/exec"
 	"strings"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 const dir = "/nas-data/data/downloads"
-const bashScript = "~/unarchiver/bash/unarchive"
+const bashScript = "./bash"
 
 func main() {
 	log.Println("Starting Watch instance for " + dir)
@@ -64,7 +65,10 @@ func handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	err := exec.Command(bashScript, event.Name).Run()
+	cmd := exec.Command("/usr/bin/7z", "x", event.Name, "-o"+dir)
+	result, err := cmd.CombinedOutput()
+
+	log.Println(string(result))
 
 	if err != nil {
 		log.Println("error:", err)
