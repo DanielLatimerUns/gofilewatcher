@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -55,23 +56,78 @@ func listenForEvents(watcher *fsnotify.Watcher) {
 
 func handleEvent(event fsnotify.Event) {
 	log.Println("Event: " + event.Name)
+
 	if !event.Has(fsnotify.Create) {
 		return
 	}
 
 	log.Println("Created event captured: " + event.Name)
 
-	if !strings.Contains(event.Name, "7z") {
+	file, err := os.Open(event.Name)
+
+	if checkError(err) {
 		return
 	}
 
-	cmd := exec.Command("/usr/bin/7z", "x", event.Name, "-o"+dir)
+	defer file.Close()
+
+	stat, err := file.Stat()
+
+	if checkError(err) {
+		return
+	}
+
+	if stat.IsDir() {
+		handleDirCreation(stat)
+		return
+	}
+
+	if checkIfArchive(file.Name()) {
+		return
+	}
+
+	handleUnarchiveCommand(event.Name)
+}
+
+func handleUnarchiveCommand(name string) {
+	cmd := exec.Command("/usr/bin/7z", "x", name, "-o"+dir)
 	result, err := cmd.CombinedOutput()
 
 	log.Println(string(result))
 
-	if err != nil {
-		log.Println("error:", err)
+	if checkError(err) {
 		return
 	}
+}
+
+func handleDirCreation(dir os.FileInfo) {
+	files, err := os.ReadDir(dir.Name())
+
+	if checkError(err) {
+		return
+	}
+
+	for _, file := range files {
+		if checkIfArchive(file.Name()) {
+			return
+		}
+
+		handleUnarchiveCommand(file.Name())
+	}
+}
+
+func checkIfArchive(name string) bool {
+	if !strings.Contains(name, ".rar") {
+		return false
+	}
+
+	return true
+}
+
+func checkError(err error) bool {
+	if err != nil {
+		log.Println("error:", err)
+		return true
+	}
+	return false
 }
