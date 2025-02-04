@@ -4,16 +4,19 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/fsnotify/fsnotify"
 )
 
-const dir = "/nas-data/data/downloads"
-const bashScript = "./bash"
+const rootDir = "/nas-data/data/downloads"
 
 func main() {
-	log.Println("Starting Watch instance for " + dir)
+	// lets first make sure we dont have existing archives that need extracting
+	handleAll()
+
+	log.Println("Starting Watch instance for " + rootDir)
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal(err)
@@ -28,7 +31,7 @@ func main() {
 
 	go listenForEvents(watcher)
 
-	err = watcher.Add(dir)
+	err = watcher.Add(rootDir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -78,19 +81,54 @@ func handleEvent(event fsnotify.Event) {
 	}
 
 	if stat.IsDir() {
-		handleDirCreation(stat)
+		handleDir(stat.Name())
 		return
 	}
 
-	if checkIfArchive(file.Name()) {
+	if !checkIfArchive(file.Name()) {
 		return
 	}
 
-	handleUnarchiveCommand(event.Name)
+	handleUnarchiveCommand(event.Name, rootDir)
 }
 
-func handleUnarchiveCommand(name string) {
-	cmd := exec.Command("/usr/bin/7z", "x", name, "-o"+dir)
+func handleAll() {
+	dirs, err := os.ReadDir(rootDir)
+
+	if checkError(err) {
+		return
+	}
+
+	for _, fdir := range dirs {
+		if fdir.IsDir() {
+
+			if checkError(err) {
+				continue
+			}
+
+			handleDir(rootDir + "/" + fdir.Name())
+		}
+	}
+}
+
+func handleDir(dir string) {
+	files, err := os.ReadDir(dir)
+
+	if checkError(err) {
+		return
+	}
+
+	for _, file := range files {
+		if !checkIfArchive(file.Name()) {
+			continue
+		}
+
+		handleUnarchiveCommand(filepath.Join(dir, file.Name()), dir)
+	}
+}
+
+func handleUnarchiveCommand(name string, outDir string) {
+	cmd := exec.Command("/usr/bin/7z", "x", name, "-o"+outDir, "-aos")
 	result, err := cmd.CombinedOutput()
 
 	log.Println(string(result))
@@ -100,28 +138,12 @@ func handleUnarchiveCommand(name string) {
 	}
 }
 
-func handleDirCreation(dir os.FileInfo) {
-	files, err := os.ReadDir(dir.Name())
-
-	if checkError(err) {
-		return
-	}
-
-	for _, file := range files {
-		if checkIfArchive(file.Name()) {
-			return
-		}
-
-		handleUnarchiveCommand(file.Name())
-	}
-}
-
 func checkIfArchive(name string) bool {
-	if !strings.Contains(name, ".rar") {
-		return false
+	if strings.Contains(name, ".rar") {
+		return true
 	}
 
-	return true
+	return false
 }
 
 func checkError(err error) bool {
