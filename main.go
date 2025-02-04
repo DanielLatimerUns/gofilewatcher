@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
 	"os/exec"
@@ -10,10 +11,18 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-const rootDir = "/nas-data/data/downloads"
+var rootDir string
 
 func main() {
-	handlePreWatch()
+	var skipPreWatch bool
+
+	flag.StringVar(&rootDir, "dir", "nas-data/data/downloads", "Directory to start watching")
+	flag.BoolVar(&skipPreWatch, "spw", false, "Skip the pre watch")
+
+	if !skipPreWatch {
+		handlePreWatch()
+	}
+	
 	handleWatcher()
 
 	<-make(chan struct{})
@@ -23,22 +32,22 @@ func main() {
 func handleWatcher() {
 	log.Println("Starting Watch instance for " + rootDir)
 	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Fatal(err)
+	if hasError(err) {
+		panic("watcher setup failed")
 	}
 
 	defer func(watcher *fsnotify.Watcher) {
 		err := watcher.Close()
-		if err != nil {
-			log.Fatal(err)
+		if hasError(err) {
+			panic("watcher setup failed")
 		}
 	}(watcher)
 
 	go listenForEvents(watcher)
 
 	err = watcher.Add(rootDir)
-	if err != nil {
-		log.Fatal(err)
+	if hasError(err) {
+		panic("watcher setup failed")
 	}
 }
 
@@ -54,7 +63,7 @@ func listenForEvents(watcher *fsnotify.Watcher) {
 			if !ok {
 				return
 			}
-			log.Println("error:", err)
+			hasError(err)
 		}
 	}
 }
@@ -69,20 +78,20 @@ func handleEvent(event fsnotify.Event) {
 	log.Println("Created event captured: " + event.Name)
 
 	file, err := os.Open(event.Name)
-	if isError(err) {
+	if hasError(err) {
 		return
 	}
 
 	defer func(file *os.File) {
 		err := file.Close()
-		if isError(err) {
+		if hasError(err) {
 			panic("Cannot close file handle")
 		}
 	}(file)
 
 	stat, err := file.Stat()
 
-	if isError(err) {
+	if hasError(err) {
 		return
 	}
 
@@ -100,14 +109,14 @@ func handleEvent(event fsnotify.Event) {
 
 func handlePreWatch() {
 	dirs, err := os.ReadDir(rootDir)
-	if isError(err) {
+	if hasError(err) {
 		return
 	}
 
 	for _, dir := range dirs {
 		if dir.IsDir() {
 
-			if isError(err) {
+			if hasError(err) {
 				continue
 			}
 
@@ -119,7 +128,7 @@ func handlePreWatch() {
 func handleDir(dir string) {
 	files, err := os.ReadDir(dir)
 
-	if isError(err) {
+	if hasError(err) {
 		return
 	}
 
@@ -138,20 +147,16 @@ func handleCommandExecution(fileName string, outDir string) {
 
 	log.Println(string(result))
 
-	if isError(err) {
+	if hasError(err) {
 		return
 	}
 }
 
 func isArchive(fileName string) bool {
-	if strings.Contains(fileName, ".rar") {
-		return true
-	}
-
-	return false
+	return strings.Contains(fileName, ".rar")
 }
 
-func isError(err error) bool {
+func hasError(err error) bool {
 	if err != nil {
 		log.Println("error:", err)
 		return true
