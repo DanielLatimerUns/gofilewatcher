@@ -13,9 +13,14 @@ import (
 const rootDir = "/nas-data/data/downloads"
 
 func main() {
-	// lets first make sure we dont have existing archives that need extracting
-	handleAll()
+	handlePreWatch()
+	handleWatcher()
 
+	<-make(chan struct{})
+	// Block main goroutine forever.
+}
+
+func handleWatcher() {
 	log.Println("Starting Watch instance for " + rootDir)
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -35,9 +40,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// Block main goroutine forever.
-	<-make(chan struct{})
 }
 
 func listenForEvents(watcher *fsnotify.Watcher) {
@@ -58,7 +60,7 @@ func listenForEvents(watcher *fsnotify.Watcher) {
 }
 
 func handleEvent(event fsnotify.Event) {
-	log.Println("Event: " + event.Name)
+	log.Println("Event captured: " + event.Name)
 
 	if !event.Has(fsnotify.Create) {
 		return
@@ -67,46 +69,49 @@ func handleEvent(event fsnotify.Event) {
 	log.Println("Created event captured: " + event.Name)
 
 	file, err := os.Open(event.Name)
-
-	if checkError(err) {
+	if isError(err) {
 		return
 	}
 
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if isError(err) {
+			panic("Cannot close file handle")
+		}
+	}(file)
 
 	stat, err := file.Stat()
 
-	if checkError(err) {
+	if isError(err) {
 		return
 	}
 
 	if stat.IsDir() {
-		handleDir(stat.Name())
+		handleDir(filepath.Join(rootDir, stat.Name()))
 		return
 	}
 
-	if !checkIfArchive(file.Name()) {
+	if !isArchive(file.Name()) {
 		return
 	}
 
-	handleUnarchiveCommand(event.Name, rootDir)
+	handleCommandExecution(event.Name, rootDir)
 }
 
-func handleAll() {
+func handlePreWatch() {
 	dirs, err := os.ReadDir(rootDir)
-
-	if checkError(err) {
+	if isError(err) {
 		return
 	}
 
-	for _, fdir := range dirs {
-		if fdir.IsDir() {
+	for _, dir := range dirs {
+		if dir.IsDir() {
 
-			if checkError(err) {
+			if isError(err) {
 				continue
 			}
 
-			handleDir(rootDir + "/" + fdir.Name())
+			handleDir(filepath.Join(rootDir, dir.Name()))
 		}
 	}
 }
@@ -114,39 +119,39 @@ func handleAll() {
 func handleDir(dir string) {
 	files, err := os.ReadDir(dir)
 
-	if checkError(err) {
+	if isError(err) {
 		return
 	}
 
 	for _, file := range files {
-		if !checkIfArchive(file.Name()) {
+		if !isArchive(file.Name()) {
 			continue
 		}
 
-		handleUnarchiveCommand(filepath.Join(dir, file.Name()), dir)
+		handleCommandExecution(filepath.Join(dir, file.Name()), dir)
 	}
 }
 
-func handleUnarchiveCommand(name string, outDir string) {
-	cmd := exec.Command("/usr/bin/7z", "x", name, "-o"+outDir, "-aos")
+func handleCommandExecution(fileName string, outDir string) {
+	cmd := exec.Command("/usr/bin/7z", "x", fileName, "-o"+outDir, "-aos")
 	result, err := cmd.CombinedOutput()
 
 	log.Println(string(result))
 
-	if checkError(err) {
+	if isError(err) {
 		return
 	}
 }
 
-func checkIfArchive(name string) bool {
-	if strings.Contains(name, ".rar") {
+func isArchive(fileName string) bool {
+	if strings.Contains(fileName, ".rar") {
 		return true
 	}
 
 	return false
 }
 
-func checkError(err error) bool {
+func isError(err error) bool {
 	if err != nil {
 		log.Println("error:", err)
 		return true
